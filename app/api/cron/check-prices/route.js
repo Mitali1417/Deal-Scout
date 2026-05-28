@@ -60,30 +60,39 @@ export async function POST(request) {
           .eq("id", product.id);
 
         if (oldPrice !== newPrice) {
-          await supabase.from("price_history").insert({
+          const { error: historyInsertError } = await supabase.from("price_history").insert({
             product_id: product.id,
             price: newPrice,
             currency: productData.currencyCode || product.currency,
           });
 
+          if (historyInsertError) {
+            console.error(`Price history insert failed for product ${product.id}:`, historyInsertError);
+          }
+
           results.priceChanges++;
 
           if (newPrice < oldPrice) {
-            const {
-              data: { user },
-            } = await supabase.auth.admin.getUserById(product.user_id);
+            try {
+              const userLookupResult = await supabase.auth.admin.getUserById(product.user_id);
+              const userEmail = userLookupResult?.data?.user?.email;
 
-            if (user?.email) {
-              const emailResult = await sendPriceDropAlert(
-                user.email,
-                product,
-                oldPrice,
-                newPrice
-              );
+              if (userEmail) {
+                const emailResult = await sendPriceDropAlert(
+                  userEmail,
+                  product,
+                  oldPrice,
+                  newPrice
+                );
 
-              if (emailResult.success) {
-                results.alertsSent++;
+                if (emailResult.success) {
+                  results.alertsSent++;
+                } else {
+                  console.error(`Email send failed for product ${product.id}:`, emailResult.error);
+                }
               }
+            } catch (e) {
+              console.error(`User lookup failed for product ${product.id}:`, e.message);
             }
           }
         }
@@ -111,3 +120,6 @@ export async function GET() {
     message: "Price check endpoint is working. Use POST to trigger.",
   });
 }
+
+
+// curl.exe -X POST http://localhost:3000/api/cron/check-prices -H "Authorization: Bearer 417019013f50670e19324370b172981e3a07b8b54af7ee4846694ff2e85bcc13"  
